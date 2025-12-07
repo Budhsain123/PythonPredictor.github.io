@@ -65,11 +65,28 @@ def auto_login():
         "username": username
     }
 
-    res = requests.post(LOGIN_URL, json=payload)
+    print("🔹 DEBUG: Sending Login Request")
+    print("URL:", LOGIN_URL)
+    print("Payload:", json.dumps(payload, indent=2))
 
     try:
-        return res.json()["data"]["token"]
-    except:
+        res = requests.post(LOGIN_URL, json=payload, timeout=15)
+    except Exception as e:
+        print("❌ Request failed:", str(e))
+        return None
+
+    print("🔹 DEBUG: Response Status Code:", res.status_code)
+    print("🔹 DEBUG: Response Body:", res.text)
+
+    try:
+        token = res.json()["data"]["token"]
+        print("✅ Login successful! Token:", token)
+        return token
+    except KeyError:
+        print("❌ Login failed: Token not found in response")
+        return None
+    except Exception as e:
+        print("❌ Login failed with exception:", str(e))
         return None
 
 
