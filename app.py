@@ -1,11 +1,8 @@
+from fastapi import FastAPI
 import requests
 import hashlib
-import json
 import time
 import os
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-
 
 app = FastAPI()
 
@@ -19,7 +16,7 @@ LOGIN_URL = "https://91clubapi.com/api/webapi/Login"
 TEAM_DAY_URL = "https://91clubapi.com/api/webapi/TeamDayReport"
 
 
-# SIGNATURE FUNCTIONS
+# LOGIN SIGNATURE
 def generate_login_signature(language, logintype, phonetype, pwd, random_str, username):
     shonustr = (
         f'{{"language":{language},"logintype":"{logintype}","phonetype":{phonetype},'
@@ -34,7 +31,6 @@ def generate_random32():
 
 
 def generate_random12():
-    # They accept ANY string; using hex for safety
     return os.urandom(16).hex()
 
 
@@ -44,6 +40,9 @@ def make_signature(payload):
 
 # AUTO LOGIN
 def auto_login():
+    username = AUTO_USERNAME
+    password = AUTO_PASSWORD
+
     language = 0
     logintype = "mobile"
     phonetype = 1
@@ -52,35 +51,30 @@ def auto_login():
     timestamp = str(int(time.time()))
 
     signature = generate_login_signature(
-        language, logintype, phonetype, AUTO_PASSWORD, random_str, AUTO_USERNAME
+        language, logintype, phonetype, password, random_str, username
     )
 
     payload = {
         "language": language,
         "logintype": logintype,
         "phonetype": phonetype,
-        "pwd": AUTO_PASSWORD,
+        "pwd": password,
         "random": random_str,
         "timestamp": timestamp,
         "signature": signature,
-        "username": AUTO_USERNAME
+        "username": username
     }
 
-    r = requests.post(LOGIN_URL, json=payload)
+    res = requests.post(LOGIN_URL, json=payload)
 
     try:
-        return r.json()["data"]["token"]
+        return res.json()["data"]["token"]
     except:
-        print("Login failed:", r.text)
         return None
 
 
-# TEAM DAY REPORT (via proxy)
-def team_day_report(uid):
-    token = auto_login()
-    if not token:
-        return {"error": "Login failed"}
-
+# TEAM DAY REPORT
+def fetch_team_day(bearer_token, userId):
     day = time.strftime("%Y-%m-%d")
     language = 0
     lv = -1
@@ -90,10 +84,16 @@ def team_day_report(uid):
     random_str = generate_random12()
     timestamp = int(time.time())
 
-    payload_str = (
-        f'{{"day":"{day}","language":{language},"lv":{lv},"pageNo":{pageNo},'
-        f'"pageSize":{pageSize},"random":"{random_str}","userId":{uid}}}'
-    )
+    if userId:
+        payload_str = (
+            f'{{"day":"{day}","language":{language},"lv":{lv},"pageNo":{pageNo},'
+            f'"pageSize":{pageSize},"random":"{random_str}","userId":{userId}}}'
+        )
+    else:
+        payload_str = (
+            f'{{"day":"{day}","language":{language},"lv":{lv},"pageNo":{pageNo},'
+            f'"pageSize":{pageSize},"random":"{random_str}"}}'
+        )
 
     signature = make_signature(payload_str)
 
@@ -105,32 +105,38 @@ def team_day_report(uid):
         "pageSize": pageSize,
         "random": random_str,
         "signature": signature,
-        "timestamp": timestamp,
-        "userId": int(uid)
+        "timestamp": timestamp
     }
+    if userId:
+        body["userId"] = int(userId)
 
     headers = {
         "Host": "91clubapi.com",
-        "authorization": f"Bearer {token}",
+        "authorization": f"Bearer {bearer_token}",
         "sec-ch-ua-platform": "\"Android\"",
         "content-type": "application/json"
     }
 
-    res = requests.post(TEAM_DAY_URL, json=body, headers=headers)
+    response = requests.post(TEAM_DAY_URL, headers=headers, json=body)
 
     try:
-        data = res.json()["data"]["list"]
+        return response.json()
     except:
-        return {"error": "Response error", "details": res.text}
+        return {"error": "Bad response", "raw": response.text}
 
-    if not data:
-        return {"error": "This user is not registered with NextWinAi's Referral Link"}
 
+# ============================
+# API ENDPOINT (Render)
+# ============================
+
+@app.get("/")
+def home(uid: str = None):
+    if uid is None:
+        return {"error": "UID missing. Use ?uid=12345"}
+
+    token = auto_login()
+    if token is None:
+        return {"error": "Login failed"}
+
+    data = fetch_team_day(token, uid)
     return data
-
-
-# PUBLIC API
-@app.get("/get-data")
-def api(uid: int):
-    result = team_day_report(uid)
-    return JSONResponse(result)
